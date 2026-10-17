@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="id">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#173b66">
+    <title>Tracking DO | SITTA Universitas Terbuka</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header class="site-header">
+        <a class="brand" href="index.html" aria-label="SITTA, kembali ke beranda">
+            <span class="brand-mark" aria-hidden="true">UT</span>
+            <span class="brand-name">SITTA <small>Universitas Terbuka</small></span>
+        </a>
+        <nav class="main-nav" aria-label="Menu utama">
+            <a class="nav-link" href="index.html">Beranda</a>
+            <a class="nav-link" href="stok.html">Stok Bahan Ajar</a>
+            <a class="nav-link is-active" href="tracking.html" aria-current="page">Tracking DO</a>
+        </nav>
+    </header>
+
+    <main class="page-shell" id="app" v-cloak>
+        <!-- ===== JUDUL HALAMAN ===== -->
+        <section class="page-intro page-intro-row">
+            <div>
+                <p class="eyebrow">Layanan pengiriman</p>
+                <h1>Tracking Delivery Order</h1>
+                <p class="muted-copy">Cari nomor DO untuk melihat status pengiriman, atau buat DO baru.</p>
+            </div>
+            <div class="summary-row">
+                <div class="stat-card">
+                    Jumlah DO tercatat
+                    <strong v-text="doList.length"></strong>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===== PENCARIAN DO ===== -->
+        <section class="panel" aria-labelledby="search-title">
+            <div class="panel-heading">
+                <div>
+                    <p class="eyebrow">Pencarian pesanan</p>
+                    <h2 id="search-title">Cari nomor DO</h2>
+                </div>
+            </div>
+            <form class="search-form" @submit.prevent="cariDO">
+                <div class="form-field search-field">
+                    <label for="tracking-number">Nomor Delivery Order</label>
+                    <input
+                        id="tracking-number"
+                        type="text"
+                        autocomplete="off"
+                        placeholder="Contoh: DO2025-0001"
+                        v-model="searchNumber"
+                    >
+                </div>
+                <button class="button button-primary" type="submit">Cari</button>
+            </form>
+            <p class="form-feedback feedback-error" v-if="searchError" role="alert">{{ searchError }}</p>
+        </section>
+
+        <!-- ===== HASIL TRACKING ===== -->
+        <section class="panel" ref="hasil" v-if="activeOrder" aria-live="polite">
+            <div class="order-heading">
+                <div>
+                    <p class="eyebrow">Nomor DO {{ activeNumber }}</p>
+                    <h2 v-text="activeOrder.nama"></h2>
+                </div>
+                <span class="status-badge" :class="statusClass(activeOrder.status)">{{ activeOrder.status }}</span>
+            </div>
+
+            <div class="progress-section">
+                <div class="progress-heading">
+                    <strong>Status perjalanan</strong>
+                    <span>{{ progressLabel }} ({{ progress }}%)</span>
+                </div>
+                <div
+                    class="progress-track"
+                    role="progressbar"
+                    aria-label="Progres pengiriman"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    :aria-valuenow="progress"
+                >
+                    <span class="progress-bar" :style="{ width: progress + '%' }"></span>
+                </div>
+            </div>
+
+            <dl class="details-grid">
+                <div>
+                    <dt>NIM</dt>
+                    <dd>{{ activeOrder.nim }}</dd>
+                </div>
+                <div>
+                    <dt>Ekspedisi</dt>
+                    <dd>{{ activeOrder.ekspedisi }}</dd>
+                </div>
+                <div>
+                    <dt>Tanggal kirim</dt>
+                    <dd>{{ activeOrder.tanggalKirim }}</dd>
+                </div>
+                <div>
+                    <dt>Paket bahan ajar</dt>
+                    <dd>{{ activeOrder.paket }} &middot; {{ namaPaket(activeOrder.paket) }}</dd>
+                </div>
+                <div>
+                    <dt>Total pembayaran</dt>
+                    <dd>{{ formatRupiah(activeOrder.total) }}</dd>
+                </div>
+            </dl>
+
+            <div class="timeline-heading">
+                <p class="eyebrow">Perjalanan paket</p>
+                <h3>Riwayat pengiriman</h3>
+            </div>
+            <ol class="timeline">
+                <li v-for="event in sortedEvents" :key="event.waktu">
+                    <time :datetime="event.waktu.replace(' ', 'T')">{{ event.waktu }}</time>
+                    <p>{{ event.keterangan }}</p>
+                </li>
+            </ol>
+        </section>
+
+        <div class="tracking-layout">
+            <!-- ===== FORM DO BARU ===== -->
+            <section class="panel" aria-labelledby="form-title">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">Delivery Order baru</p>
+                        <h2 id="form-title">Buat DO</h2>
+                    </div>
+                </div>
+
+                <form novalidate @submit.prevent="submitDO">
+                    <div class="form-grid">
+                        <div class="form-field">
+                            <label for="do-nomor">Nomor DO</label>
+                            <input id="do-nomor" type="text" :value="nextNomorDO" readonly>
+                            <p class="field-hint">Dibuat otomatis.</p>
+                        </div>
+
+                        <div class="form-field" :class="{ 'has-error': submitAttempted && formErrors.nim }">
+                            <label for="do-nim">NIM</label>
+                            <input id="do-nim" type="text" inputmode="numeric" maxlength="9" placeholder="9 digit angka" v-model.trim="form.nim">
+                            <p class="field-error" v-if="submitAttempted && formErrors.nim">{{ formErrors.nim }}</p>
+                        </div>
+
+                        <div class="form-field" :class="{ 'has-error': submitAttempted && formErrors.nama }">
+                            <label for="do-nama">Nama mahasiswa</label>
+                            <input id="do-nama" type="text" placeholder="Nama lengkap" v-model="form.nama">
+                            <p class="field-error" v-if="submitAttempted && formErrors.nama">{{ formErrors.nama }}</p>
+                        </div>
+
+                        <div class="form-field" :class="{ 'has-error': submitAttempted && formErrors.ekspedisi }">
+                            <label for="do-ekspedisi">Ekspedisi</label>
+                            <select id="do-ekspedisi" v-model="form.ekspedisi">
+                                <option value="" disabled>Pilih ekspedisi</option>
+                                <option v-for="item in pengirimanList" :key="item.kode" :value="item.kode">JNE {{ item.nama }}</option>
+                            </select>
+                            <p class="field-error" v-if="submitAttempted && formErrors.ekspedisi">{{ formErrors.ekspedisi }}</p>
+                        </div>
+
+                        <div class="form-field" :class="{ 'has-error': submitAttempted && formErrors.tanggalKirim }">
+                            <label for="do-tanggal">Tanggal kirim</label>
+                            <input id="do-tanggal" type="date" v-model="form.tanggalKirim">
+                            <p class="field-error" v-if="submitAttempted && formErrors.tanggalKirim">{{ formErrors.tanggalKirim }}</p>
+                        </div>
+
+                        <div class="form-field">
+                            <label for="do-total">Total harga</label>
+                            <input id="do-total" type="text" :value="formatRupiah(form.total)" readonly>
+                            <p class="field-hint">Mengikuti harga paket.</p>
+                        </div>
+
+                        <div class="form-field span-all" :class="{ 'has-error': submitAttempted && formErrors.paketKode }">
+                            <label for="do-paket">Paket bahan ajar</label>
+                            <select id="do-paket" v-model="form.paketKode">
+                                <option value="" disabled>Pilih paket</option>
+                                <option v-for="item in paket" :key="item.kode" :value="item.kode">{{ item.kode }} &mdash; {{ item.nama }}</option>
+                            </select>
+                            <p class="field-error" v-if="submitAttempted && formErrors.paketKode">{{ formErrors.paketKode }}</p>
+
+                            <!-- Detail isi paket muncul tepat di bawah select setelah paket dipilih. -->
+                            <div class="package-detail" v-show="selectedPaket" aria-live="polite">
+                                <template v-if="selectedPaket">
+                                    <p>Isi {{ selectedPaket.nama }}:</p>
+                                    <ul>
+                                        <li v-for="kode in selectedPaket.isi" :key="kode">
+                                            <strong>{{ kode }}</strong> &ndash; {{ judulBahanAjar(kode) }}
+                                        </li>
+                                    </ul>
+                                    <p class="package-price">Harga paket: <strong>{{ formatRupiah(selectedPaket.harga) }}</strong></p>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
+                    <p class="form-feedback" v-if="successMessage" role="status">{{ successMessage }}</p>
+                    <p class="form-feedback feedback-error" v-else-if="submitAttempted && !isFormValid" role="alert">
+                        Data DO belum lengkap. Periksa kembali kolom yang ditandai merah.
+                    </p>
+
+                    <div class="form-actions">
+                        <button class="button button-outline" type="button" @click="resetForm">Kosongkan form</button>
+                        <button class="button button-primary" type="submit">Simpan DO</button>
+                    </div>
+                </form>
+            </section>
+
+            <!-- ===== DAFTAR DO ===== -->
+            <section class="panel" aria-labelledby="list-title">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">Data tersimpan</p>
+                        <h2 id="list-title">Daftar DO</h2>
+                    </div>
+                </div>
+                <ul class="do-list">
+                    <li v-for="item in doList" :key="item.nomor" :class="{ 'is-active': item.nomor === activeNumber }">
+                        <div>
+                            <strong>{{ item.nomor }}</strong>
+                            <span>{{ item.nama }} &middot; {{ item.status }}</span>
+                        </div>
+                        <button class="button button-outline button-small" type="button" @click="lihatDO(item.nomor)">Lihat</button>
+                    </li>
+                </ul>
+            </section>
+        </div>
+    </main>
+
+    <script src="js/vue.min.js"></script>
+    <script src="js/tracking-app.js"></script>
+</body>
+</html>
